@@ -1,0 +1,188 @@
+# api.py
+from flask import Flask, request, jsonify
+import pandas as pd
+import pickle
+import os
+import numpy as np
+import traceback
+from dotenv import load_dotenv 
+import openai 
+
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_API_KEY")
+COLUMNAS_MODELO = [
+    'precio',
+    'mes', 
+    'trimestre', 
+    'ano',
+    'venta_mes_anterior',
+    'venta_mismo_mes_ano_anterior', # <-- Faltaba esta
+    'media_movil_3m',
+    'std_movil_3m'                  # <-- Faltaba esta
+]
+app = Flask(__name__)
+
+model = None
+try:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # Asegúrate de que este sea el modelo entrenado con RandomizedSearchCV
+    modelo_path = os.path.join(script_dir, 'modelo_prediccion_mensual.pkl')
+    with open(modelo_path, 'rb') as file:
+        model = pickle.load(file)
+    print("--- Modelo de predicción MENSUAL OPTIMIZADO cargado exitosamente ---")
+except Exception as e:
+    print(f"!!! ERROR CRÍTICO AL CARGAR EL MODELO: {str(e)} !!!")
+
+
+def predecir(lista_productos, meses_a_predecir=1):
+    if model is None: return {"error": "El modelo no está cargado."}
+
+    resultados = []
+    for datos_producto in lista_productos:
+        try:
+            cantidad_total_predicha = 0
+            
+            # --- CAMBIO 2: Recoger TODAS las características del payload de Laravel ---
+            features_iterativas = {
+                'precio': datos_producto['precio_actual'],
+                'venta_mes_anterior': datos_producto['venta_mes_anterior'],
+                'venta_mismo_mes_ano_anterior': datos_producto['venta_mismo_mes_ano_anterior'],
+                'media_movil_3m': datos_producto['media_movil_3m'],
+                'std_movil_3m': datos_producto['std_movil_3m'],
+            }
+            
+            fecha_actual = pd.to_datetime(datos_producto['fecha_a_predecir']).to_period('M').to_timestamp()
+
+            for _ in range(meses_a_predecir):
+                # 1. Actualizar características de tiempo
+                features_iterativas['mes'] = fecha_actual.month
+                features_iterativas['trimestre'] = fecha_actual.quarter
+                features_iterativas['ano'] = fecha_actual.year
+                
+                # 2. Predecir
+                df_features = pd.DataFrame([features_iterativas])
+                df_features = df_features[COLUMNAS_MODELO] # Reordenar
+                
+                log_prediccion = model.predict(df_features)
+                
+                # --- CAMBIO 3: Revertir la transformación logarítmica ---
+                cantidad_predicha_mes = np.expm1(log_prediccion[0])
+                cantidad_predicha_mes = round(float(cantidad_predicha_mes))
+
+                if cantidad_predicha_mes < 0: cantidad_predicha_mes = 0
+                
+                cantidad_total_predicha += cantidad_predicha_mes
+                
+                # 4. Preparar la siguiente iteración
+                features_iterativas['venta_mes_anterior'] = cantidad_predicha_mes
+                
+                fecha_actual = (fecha_actual.to_period('M') + 1).to_timestamp()
+
+            resultados.append({
+                'codigo_stock': datos_producto['codigo_stock'],
+                'cantidad_predicha': cantidad_total_predicha 
+            })
+        except Exception as e:
+            resultados.append({
+                'codigo_stock': datos_producto.get('codigo_stock', 'desconocido'), 
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            })
+            
+    return {"predicciones": resultados}
+
+
+
+# --- 4. NUEVA LÓGICA PARA SUGERENCIAS CON OPENAI --- 🤖
+def obtener_sugerencia_ia(nombre, categoria, stock, ventas_mes, rotacion,mes):
+    try:
+        # Prompt mejorado con más contexto para mejores respuestas
+        prompt = f"""
+        Actúa como un Analista Estratégico de Inventarios para una empresa comercial en Trujillo, Perú. Tu objetivo es maximizar la rentabilidad y la eficiencia del inventario.
+
+        Proporciona una recomendación de negocio profesional, concisa y accionable en español para el siguiente producto, considerando que estamos en el mes {mes} del año.
+        Al tratarse de ventas, ten en cuenta el tipo de producto y considera las estaciones del año y las temporadas de productos existentes en el país, ya que el comportamiento de los clientes varía según temporadas.
+        **Información del Producto:**
+        - Nombre: {nombre}
+        - Categoría: {categoria}
+        - Numero del mes de evaluación: {mes} donde el mes 1 es Enero y el mes 12 es Diciembre
+        - El producto a inicio de mes tuvo un stock inicial de {stock + ventas_mes}
+        - Stock Actual: {stock} unidades
+        - Ventas del Mes de Evaluación: {ventas_mes} unidades
+        - Índice de Rotación: {rotacion}
+
+        **Contexto para el Índice de Rotación:**
+        - Un índice menor al 100% se considera BAJO (potencial exceso de stock).
+        - Un índice entre 100 y 300% se considera SALUDABLE.
+        - Un índice mayor a 300% se considera ALTO (alta demanda o riesgo de quiebre de stock).
+
+        Basado en todos estos datos, dame una sugerencia estratégica directa. Al final, me debes devolver la respuesta con este formato: Diagnóstico: texto del diagnostico, Acción Recomendada:texto de la accion recomendada, Justificación: texto de la justificacion.
+        Sugerencia:
+        """
+
+        completion = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres un analista de inventarios experto."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=150, # Aumentamos un poco por si la respuesta es más elaborada
+        )
+        
+        sugerencia = completion.choices[0].message.content.strip()
+        return {"sugerencia": sugerencia}
+    except Exception as e:
+        return {"error": f"Error al contactar la API de OpenAI: {str(e)}"}
+
+
+# --- 5. RUTAS DE LA API (ENDPOINTS) ---
+
+# Ruta para la predicción de demanda (tu código existente, sin cambios)
+@app.route('/predict', methods=['POST'])
+def handle_prediction():
+    try:
+        input_data = request.get_json()
+        if not input_data or 'productos' not in input_data:
+            return jsonify({"error": "Payload inválido."}), 400
+        
+        meses_para_predecir = int(input_data.get('meses_a_predecir', 1))
+
+        resultado = predecir(input_data['productos'], meses_para_predecir)
+        return jsonify(resultado)
+    except Exception as e:
+        return jsonify({"error": "Error interno.", "details": str(e)}), 500
+
+# Nueva ruta para las sugerencias de OpenAI
+@app.route('/suggest', methods=['POST'])
+def handle_suggestion():
+    try:
+        input_data = request.get_json()
+        
+        # Validamos que todos los nuevos campos estén presentes
+        required_keys = ["nombre", "categoria", "stock", "ventas_mes", "rotacion"]
+        if not all(k in input_data for k in required_keys):
+            return jsonify({"error": f"Faltan datos. Se requieren: {', '.join(required_keys)}"}), 400
+        
+        resultado = obtener_sugerencia_ia(
+            input_data["nombre"], 
+            input_data["categoria"],
+            input_data["stock"],
+            input_data["ventas_mes"],
+            input_data["rotacion"],
+            input_data["mes"],
+
+
+        )
+
+        if "error" in resultado:
+            return jsonify(resultado), 500
+
+        return jsonify(resultado)
+    except Exception as e:
+        return jsonify({"error": "Error interno en el endpoint de sugerencias.", "details": str(e)}), 500
+
+
+# --- 6. INICIAR EL SERVIDOR ga---
+if __name__ == '__main__':
+    app.run(host='127.0.0.1', port=5000, debug=True)

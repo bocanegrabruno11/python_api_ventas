@@ -1,0 +1,13 @@
+# Archivos de modelos y datos
+
+*.csv
+/data/
+/models/
+.env
+# Entornos virtuales (es crucial ignorarlos también)
+venv/
+.venv/
+
+# Archivos de caché de Python
+__pycache__/
+*.pyc
