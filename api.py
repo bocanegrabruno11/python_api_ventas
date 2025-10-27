@@ -41,7 +41,7 @@ def predecir(lista_productos, meses_a_predecir=1):
     for datos_producto in lista_productos:
         try:
             cantidad_total_predicha = 0
-            
+            detalle_mensual = []
             # --- CAMBIO 2: Recoger TODAS las características del payload de Laravel ---
             features_iterativas = {
                 'precio': datos_producto['precio_actual'],
@@ -72,6 +72,10 @@ def predecir(lista_productos, meses_a_predecir=1):
                 if cantidad_predicha_mes < 0: cantidad_predicha_mes = 0
                 
                 cantidad_total_predicha += cantidad_predicha_mes
+                detalle_mensual.append({
+                    'fecha': fecha_actual.strftime('%Y-%m-%d'), # Guardamos la fecha del mes
+                    'cantidad': cantidad_predicha_mes
+                })
                 
                 # 4. Preparar la siguiente iteración
                 features_iterativas['venta_mes_anterior'] = cantidad_predicha_mes
@@ -80,7 +84,8 @@ def predecir(lista_productos, meses_a_predecir=1):
 
             resultados.append({
                 'codigo_stock': datos_producto['codigo_stock'],
-                'cantidad_predicha': cantidad_total_predicha 
+                'cantidad_total_predicha': cantidad_total_predicha,
+                'detalle_mensual': detalle_mensual 
             })
         except Exception as e:
             resultados.append({
@@ -183,6 +188,6 @@ def handle_suggestion():
         return jsonify({"error": "Error interno en el endpoint de sugerencias.", "details": str(e)}), 500
 
 
-# --- 6. INICIAR EL SERVIDOR ga---
+# --- 6. INICIAR EL SERVIDOR ---
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000, debug=True)
