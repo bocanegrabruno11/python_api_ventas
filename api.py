@@ -106,33 +106,39 @@ def obtener_sugerencia_ia(nombre, categoria, stock, ventas_mes, rotacion,mes):
         Actúa como un Analista Estratégico de Inventarios para una empresa comercial en Trujillo, Perú. Tu objetivo es maximizar la rentabilidad y la eficiencia del inventario.
 
         Proporciona una recomendación de negocio profesional, concisa y accionable en español para el siguiente producto, considerando que estamos en el mes {mes} del año.
-        Al tratarse de ventas, ten en cuenta el tipo de producto y considera las estaciones del año y las temporadas de productos existentes en el país, ya que el comportamiento de los clientes varía según temporadas.
-        **Información del Producto:**
+        Al tratarse de ventas, ten en cuenta el tipo de producto (Categoría: {categoria}) y considera las estaciones del año y las temporadas de productos existentes en el país.
+
+        **Datos del Producto para el Mes de Evaluación (Mes {mes}):**
         - Nombre: {nombre}
         - Categoría: {categoria}
-        - Numero del mes de evaluación: {mes} donde el mes 1 es Enero y el mes 12 es Diciembre
-        - El producto a inicio de mes tuvo un stock inicial de {stock + ventas_mes}
-        - Stock Actual: {stock} unidades
-        - Ventas del Mes de Evaluación: {ventas_mes} unidades
-        - Índice de Rotación: {rotacion}
+        - Stock Actual (al final del mes): {stock} unidades
+        - Ventas Totales del Mes: {ventas_mes} unidades
+        - Índice de Rotación del Mes: {rotacion}%  (Calculado como: Ventas / Stock Promedio * 100)
 
-        **Contexto para el Índice de Rotación:**
-        - Un índice menor al 100% se considera BAJO (potencial exceso de stock).
-        - Un índice entre 100 y 300% se considera SALUDABLE.
-        - Un índice mayor a 300% se considera ALTO (alta demanda o riesgo de quiebre de stock).
+        **Tu Tarea: Analizar los Datos**
+        Tu objetivo es analizar la *relación* entre las ventas, el stock actual y el índice de rotación.
+        
+        **Contexto Crítico para tu Análisis:**
+        1.  **No uses reglas simplistas.** El índice de rotación es una guía, pero los números brutos son la verdad.
+        2.  **Caso de Alerta (Exceso de Stock):** Si las ventas son una fracción diminuta del stock (ej. Ventas=15, Stock=1500), esto es un **problema grave de exceso de stock**, sin importar la categoría. Una rotación tan baja (ej. 1%) es inaceptable.
+        3.  **Caso Saludable:** Si las ventas son una porción significativa del stock (ej. Ventas=140, Stock=300), la situación es mucho más saludable, aunque la rotación (ej. ~40%) sea menor a 100%. Tu análisis debe reflejar esta diferencia.
+        4.  **Prioriza el Sentido Común:** Utiliza la Categoría y el Mes para *matizar* tu recomendación, no para ignorar un problema claro de stock (como en el Caso de Alerta).
 
-        Basado en todos estos datos, dame una sugerencia estratégica directa. Al final, me debes devolver la respuesta con este formato: Diagnóstico: texto del diagnostico, Acción Recomendada:texto de la accion recomendada, Justificación: texto de la justificacion.
+        Basado en un análisis crítico de estos datos, dame una sugerencia estratégica directa. Al final, me debes devolver la respuesta con este formato:
+        Diagnóstico: [Tu análisis de la situación: exceso de stock, stock saludable, riesgo de quiebre, etc.]
+        Acción Recomendada: [Tu sugerencia accionable: liquidar stock, reponer, pausar compras, etc.]
+        Justificación: [Explica brevemente por qué das esa recomendación, basándote en la relación Ventas vs. Stock.]
         Sugerencia:
         """
 
         completion = openai.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Eres un analista de inventarios experto."},
+                {"role": "system", "content": "Eres un analista de inventarios experto que basa sus respuestas en un análisis numérico crítico."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.7,
-            max_tokens=150, # Aumentamos un poco por si la respuesta es más elaborada
+            temperature=0.5,
+            max_tokens=250, # Aumentamos un poco por si la respuesta es más elaborada
         )
         
         sugerencia = completion.choices[0].message.content.strip()
