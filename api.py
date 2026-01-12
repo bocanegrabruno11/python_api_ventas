@@ -6,7 +6,8 @@ import os
 import numpy as np
 import traceback
 from dotenv import load_dotenv 
-import openai 
+import openai
+import gdown
 
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -22,16 +23,47 @@ COLUMNAS_MODELO = [
 ]
 app = Flask(__name__)
 
+FILE_ID = '11-kF80cvWLn-G0yveyh5VT3iCMm0GiLE' 
+MODEL_FILENAME = 'modelo_prediccion_mensual.pkl'
+
+# Obtener ruta absoluta (importante para Railway)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, MODEL_FILENAME)
 model = None
-try:
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    # Asegúrate de que este sea el modelo entrenado con RandomizedSearchCV
-    modelo_path = os.path.join(script_dir, 'modelo_prediccion_mensual.pkl')
-    with open(modelo_path, 'rb') as file:
-        model = pickle.load(file)
-    print("--- Modelo de predicción MENSUAL OPTIMIZADO cargado exitosamente ---")
-except Exception as e:
-    print(f"!!! ERROR CRÍTICO AL CARGAR EL MODELO: {str(e)} !!!")
+
+def cargar_modelo():
+    global model
+    
+    # 1. Verificar si necesitamos descargar
+    # Si no existe O si pesa menos de 10KB (significa que es el puntero LFS corrupto)
+    if not os.path.exists(MODEL_PATH) or os.path.getsize(MODEL_PATH) < 10240:
+        print(f"--- El modelo no existe o es incorrecto. Iniciando descarga desde Drive... ---")
+        try:
+            # Descarga usando gdown (maneja archivos grandes automáticamente)
+            url = f'https://drive.google.com/uc?id={FILE_ID}'
+            gdown.download(url, MODEL_PATH, quiet=False)
+            print("--- Descarga completada exitosamente ---")
+        except Exception as e:
+            print(f"!!! ERROR AL DESCARGAR DE DRIVE: {e}")
+            return None
+    else:
+        print("--- Modelo encontrado localmente, saltando descarga ---")
+
+    # 2. Cargar el modelo en memoria
+    try:
+        print(f"--- Cargando modelo desde {MODEL_PATH}... ---")
+        with open(MODEL_PATH, 'rb') as f:
+            model = pickle.load(f)
+        print("--- ¡MODELO CARGADO Y LISTO! ---")
+    except Exception as e:
+        print(f"!!! ERROR CRÍTICO AL LEER EL PICKLE: {e}")
+        # Si falla al leer, tal vez el archivo está corrupto. Podrías borrarlo para reintentar la próxima.
+        if os.path.exists(MODEL_PATH):
+            os.remove(MODEL_PATH) 
+        model = None
+
+# Ejecutamos la carga al iniciar la app
+cargar_modelo()
 
 
 def predecir(lista_productos, meses_a_predecir=1):
