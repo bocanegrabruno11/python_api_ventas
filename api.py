@@ -194,6 +194,9 @@ def handle_suggestion():
         return jsonify({"error": "Error interno en el endpoint de sugerencias.", "details": str(e)}), 500
 
 
-# --- 6. INICIAR EL SERVIDOR ---
+# --- INICIAR EL SERVIDOR (CONFIGURACIÓN RAILWAY) ---
 if __name__ == '__main__':
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    # Obtenemos el puerto de Railway, por defecto 5000 si es local
+    port = int(os.environ.get("PORT", 5000))
+    # '0.0.0.0' es OBLIGATORIO para Docker/Railway
+    app.run(host='0.0.0.0', port=port)

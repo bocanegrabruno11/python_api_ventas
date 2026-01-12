@@ -1,0 +1,7 @@
+Flask
+pandas
+numpy
+python-dotenv
+openai
+scikit-learn==1.7.2
+gunicorn
